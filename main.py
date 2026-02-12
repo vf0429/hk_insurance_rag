@@ -33,24 +33,25 @@ logger = logging.getLogger(__name__)
 DEEPSEEK_API_KEY = "sk-ufsptsmrlhiphmszabdpufeqqvvnyjmeudmtnrlfgpfzlyma" # Provided by user on 2026-02-10
 DEEPSEEK_BASE_URL = "https://api.siliconflow.cn/v1"
 
-app = FastAPI(title="OneDegree Pet Insurance RAG API")
+app = FastAPI(title="Petwell Insurance RAG API")
 
 @app.get("/")
 async def root():
-    return {"message": "Pet Insurance RAG API is running. use /ask to query."}
+    return {"message": "Petwell Pet Insurance RAG API is running. use /ask to query."}
 
 # --- Global Components ---
 embeddings = None
 vectorstore = None
-retriever = None
+# retriever = None # We will create retriever dynamically or use a base one
 rag_chain = None
+llm = None
+prompt = None
 
 @app.on_event("startup")
 async def startup_event():
-    global embeddings, vectorstore, retriever, rag_chain
+    global embeddings, vectorstore, rag_chain, llm, prompt
     
     logger.info("Initializing Embeddings (BAAI/bge-m3)...")
-    # embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     embeddings = OpenAIEmbeddings(
         model="BAAI/bge-m3",
         openai_api_key=DEEPSEEK_API_KEY,
@@ -69,8 +70,6 @@ async def startup_event():
         embedding_function=embeddings
     )
     
-    retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5})
-    
     logger.info("Initializing MiniMAX LLM...")
     llm = ChatOpenAI(
         model="Pro/MiniMaxAI/MiniMax-M2.1",
@@ -80,75 +79,106 @@ async def startup_event():
         temperature=0.1
     )
     
-    template = """
-    ### Role
-    You are "Insurance Policy Assistant", a helpful and professional AI customer support agent. 
+    template =''' 
+        ### Role
+        You are the "Petwell AI Specialist," a professional expert on the Hong Kong pet insurance market. You provide answers based on retrieved policy documents from different providers (e.g., Blue Cross, OneDegree).
 
-    ### INTERNAL LOGIC CHECK (Mental Sandbox - DO NOT OUTPUT THIS SECTION)
-    Before answering, you MUST privately verify:
-    1. **User Scenario**: New Policy vs. Upgrade? (If New, IGNORE Section 4.6).
-    2. **Waiting Period**: Is there a 28-day waiting period for accidents? (Section 2.1).
-    3. **Age Exceptions**: Is the pet 5+ years old? Check Section 1.1 "Special Coverage Rules" (The One-Year Rule).
-    4. **General Exceptions**: Are there specific exclusions (e.g., Breeding, dental)?
+        ### INTERNAL LOGIC (Mental Sandbox - DO NOT OUTPUT)
+        1. **Identify Provider**: Which company is the user asking about? If unspecified, check all available context.
+        2. **Eligibility Check**: Verify pet age (e.g., 6 months to 8 years for Blue Cross) and breed (check for excluded breeds like Pit Bulls).
+        3. **Wait Times & Limits**: Apply provider-specific timelines (e.g., 90-day cancer wait for Blue Cross) and HK$ benefit limits.
+        4. **Conflict Resolution**: If policies differ, clearly state the terms for each provider separately.
 
-    ### OUTPUT RULES
-    - **Language**: Answer in the SAME language as the User's Question (Traditional Chinese or English).
-    - **Thinking Process**: You may think in any language, but the FINAL output must match the user's language.
-    - **Tone**: Empathetic, clear, and direct. Avoid legal jargon where possible.
-    - **Length**: Keep it concise (under 200 words).
-    - **Structure**:
-        1. **Direct Answer**: Start with a clear "Yes", "No", or "Conditional" conclusion.
-        2. **The "Why"**: Explain the rule simply (e.g., "Because there is a 28-day waiting period...").
-        3. **Key Exception (If applicable)**: Only mention exceptions if they apply to the user (e.g., the One-Year Rule for 5yo pets).
-        4. **Action**: Suggest the next step (e.g., "Check your policy schedule").
+        ### OUTPUT RULES
+        - **No Thinking Process**: Do NOT output "Internal Logic," "Thinking," or "Sandbox." Start the response immediately.
+        - **Language**: Match the user's language (Traditional Chinese or English).
+        - **Formatting**: Use **Bold Text** for all dollar amounts (e.g., **HK$1,000**) and timeframes (e.g., **30 days**).
+        - **Structure**:
+            1. **Direct Answer**: A clear "Yes/No" or summary.
+            2. **Details**: Specify the rule/limit and name the provider (e.g., "Under Blue Cross Plan B...").
+            3. **Comparison (If relevant)**: Briefly note if another provider has a different rule.
+            4. **Next Step**: One actionable suggestion.
 
-    ### Context
-    {context}
+        ### Context
+        {context}
 
-    ### User Question
-    {question}
+        ### User Question
+        {question}
 
-    ### Your Response
-    """
-
+        ### Your Response
+        '''
 
 
     prompt = ChatPromptTemplate.from_template(template)
-    
-    def format_docs(docs):
-        return "\n\n".join([f"[Section: {d.metadata.get('Clause_Name', d.metadata.get('Section_Name', 'Unknown'))}]\n{d.page_content}" for d in docs])
-    
-    rag_chain = (
-        {"context": retriever | format_docs, "question": RunnablePassthrough()}
-        | prompt
-        | llm
-        | StrOutputParser()
-    )
-    logger.info("RAG Chain initialized.")
+    logger.info("RAG Chain initialized (components loaded).")
 
 # --- API Models ---
 class QueryRequest(BaseModel):
     query: str
+    provider: str = None  # Optional provider filter
 
 class QueryResponse(BaseModel):
     answer: str
     sources: list[str]
 
+def format_docs(docs):
+    # Goal: '--- SOURCE: [provider] ([filename]) ---'
+    formatted_chunks = []
+    for d in docs:
+        provider = d.metadata.get('provider', 'Unknown')
+        filename = d.metadata.get('source', 'Unknown')
+        header = f"--- SOURCE: {provider} ({filename}) ---"
+        formatted_chunks.append(f"{header}\n{d.page_content}")
+    return "\n\n".join(formatted_chunks)
+
 @app.post("/ask", response_model=QueryResponse)
 async def ask_insurance_policy(request: QueryRequest):
-    if not rag_chain:
+    if not vectorstore:
         raise HTTPException(status_code=503, detail="RAG system not initialized")
         
     try:
-        logger.info(f"Received query: {request.query}")
+        logger.info(f"Received query: {request.query} (Filter: {request.provider})")
         
-        # 1. Retrieve docs for sources
+        # 1. Prepare retriever with optional filter
+        search_kwargs = {"k": 6}
+        
+        # Detect provider in query if not explicitly provided
+        effective_provider = request.provider
+        # Ignore default "string" value or empty values
+        if effective_provider in [None, "", "string"]:
+            effective_provider = None
+            
+        if not effective_provider:
+            query_lower = request.query.lower()
+            if "blue cross" in query_lower or "bluecross" in query_lower or "藍十字" in query_lower:
+                effective_provider = "bluecross"
+            elif "one degree" in query_lower or "onedegree" in query_lower:
+                effective_provider = "one_degree"
+
+        if effective_provider and effective_provider != "string":
+            logger.info(f"Active filter: {effective_provider}")
+            search_kwargs["filter"] = {"provider": effective_provider}
+            
+        retriever = vectorstore.as_retriever(
+            search_type="similarity", 
+            search_kwargs=search_kwargs
+        )
+        
+        # 2. Retrieve documents
         docs = await retriever.ainvoke(request.query)
-        sources = list(set([d.metadata.get("Clause_Name", d.metadata.get("Section_Name", "Policy Doc")) for d in docs]))
+        sources = list(set([f"{d.metadata.get('provider', 'Unknown')} ({d.metadata.get('source', 'Unknown')})" for d in docs]))
         
-        # 2. Generate answer
-        raw_answer = await rag_chain.ainvoke(request.query)
-        logger.info(f"Raw LLM Response Body: {repr(raw_answer)}") # Force full log
+        # 3. Build and run chain manually to handle dynamic context
+        context_str = format_docs(docs)
+        
+        chain = (
+            prompt
+            | llm
+            | StrOutputParser()
+        )
+        
+        raw_answer = await chain.ainvoke({"context": context_str, "question": request.query})
+        logger.info(f"Raw LLM Response Body: {repr(raw_answer)}")
         answer = clean_deepseek_output(raw_answer)
         
         return QueryResponse(answer=answer, sources=sources)
@@ -158,4 +188,4 @@ async def ask_insurance_policy(request: QueryRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)

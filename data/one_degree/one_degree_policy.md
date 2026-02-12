@@ -891,6 +891,7 @@ Your dog or cat with proof of identity specified in the Policy Schedule.
     4.  Heart Failure
     5.  Stroke
 * **Availability**: Available for all plans (Essential, Plus, Ultra, Prestige)
+* **Eligibility**: For **cats and dogs** aged 1-9 who have not suffered from specified critical illnesses before. The cash benefit can only be claimed once during a pet's lifetime.
 
 ### B. Additional Critical Illness Cash Benefit
 * **Cost**: + HKD 38 / mo
@@ -900,12 +901,14 @@ Your dog or cat with proof of identity specified in the Policy Schedule.
     2.  Quadriplegia
     3.  Patellar Luxation (Dislocation)
 * **Availability**: Available for all plans
+* **Eligibility**: For **cats and dogs** aged 1-9 who have not suffered from specified critical illnesses before. The cash benefit can only be claimed once during a pet's lifetime.
 
 ### C. Feline Infectious Peritonitis (FIP) Additional Coverage (Cats Only)
 * **Cost**: + HKD 66 / mo
 * **Benefit Amount**: Annual Limit **HKD 25,000**
 * **Purpose**: Additional coverage specifically for treating FIP.
 * **Availability**: Available for all plans (Essential, Plus, Ultra, Prestige) - **Cats Only**
+* **Eligibility**: For **cats** aged 1–11 who have not previously suffered from FIP before enrolment. There’s no age limit on renewal. This coverage can only be claimed once during a pet's lifetime.
 
 
 

@@ -6,7 +6,7 @@ from langchain_community.vectorstores import Chroma
 from langchain_openai import OpenAIEmbeddings
 
 # ================= 配置部分 =================
-DATA_PATH = "./one_degree"  # Changed from "./data/insurance_provider" to match actual path
+DATA_PATH = "./data"  # Changed from "./one_degree" to the root data directory
 DB_PATH = "./chroma_db"                  # 向量库存储路径
 
 # 嵌入模型配置 (必须与 main.py 一致)
@@ -24,11 +24,10 @@ EMBEDDING_MODEL = OpenAIEmbeddings(
 
 # ================= 核心处理函数 =================
 
-def load_and_process_documents(directory):
+def load_and_process_documents(data_root):
     all_processed_docs = []
     
     # 1. 定义 Markdown 标题切分器 (结构化切分)
-    # 这会把 #, ##, ### 的内容提取到 metadata 中
     headers_to_split_on = [
         ("#", "Section_Name"),
         ("##", "Chapter_Name"),
@@ -36,99 +35,113 @@ def load_and_process_documents(directory):
     ]
     markdown_splitter = MarkdownHeaderTextSplitter(
         headers_to_split_on=headers_to_split_on, 
-        strip_headers=True # 标题会被移到 metadata，我们在后面会拼回去
+        strip_headers=True
     )
 
-    # 2. 定义文本递归切分器 (防止单节过长)
-    # 【关键修改】：chunk_size 设为 2000，确保 Section 1.1 这种长逻辑不断开
+    # 2. 定义文本递归切分器
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=2000, 
         chunk_overlap=200,
         separators=["\n\n", "\n", " ", ""]
     )
 
-    if not os.path.exists(directory):
-        print(f"Directory {directory} does not exist!")
+    if not os.path.exists(data_root):
+        print(f"Directory {data_root} does not exist!")
         return []
 
-    for filename in os.listdir(directory):
-        if not filename.endswith(".md"):
-            continue
-            
-        file_path = os.path.join(directory, filename)
-        print(f"正在处理: {filename}...")
-        
-        # 读取文件
-        with open(file_path, 'r', encoding='utf-8') as f:
-            text = f.read()
-
-        # --- 特殊处理 A: 价格表/对比表 (不切分) ---
-        if "plans_pricing" in filename:
-            from langchain_core.documents import Document
-            # 表格文件直接作为一整块，保证 LLM 能读懂行和列
-            doc = Document(
-                page_content=text,
-                metadata={
-                    "source": filename,
-                    "language": "zh" if "_zh" in filename else "en",
-                    "type": "Pricing Table"
-                }
-            )
-            all_processed_docs.append(doc)
+    # Recursive scan using os.walk
+    for root, dirs, files in os.walk(data_root):
+        # Skip hidden folders (but not the current/parent directory indicators)
+        parts = root.split(os.sep)
+        if any(part.startswith('.') and part not in ['.', '..'] for part in parts):
             continue
 
-        # --- 常规处理 B: 保单条款 (切分) ---
+        # Extract provider: the first subfolder under data/
+        # e.g., if data_root is ./data and root is ./data/bluecross/sub, provider is bluecross
+        relative_path = os.path.relpath(root, data_root)
+        if relative_path == ".":
+            continue # Skip files in the root data folder
         
-        # 步骤 1: 按 Header 切分 (获取结构信息)
-        md_docs = markdown_splitter.split_text(text)
-        
-        # 步骤 2: 注入 Metadata 标签 (给切片“贴名牌”)
-        # 这是修复 DeepSeek "看不见标题" 问题的关键！
-        for doc in md_docs:
-            # 自动判断语言
-            doc.metadata["language"] = "zh" if "_zh" in filename else "en"
-            doc.metadata["source_file"] = filename
-            
-            # 构建面包屑导航: [Section 1 > 1.1 Covered Conditions]
-            breadcrumbs = []
-            if "Section_Name" in doc.metadata: breadcrumbs.append(doc.metadata["Section_Name"])
-            if "Chapter_Name" in doc.metadata: breadcrumbs.append(doc.metadata["Chapter_Name"])
-            if "Clause_Name" in doc.metadata: breadcrumbs.append(doc.metadata["Clause_Name"])
-            
-            source_tag = " > ".join(breadcrumbs)
-            # 【核心黑魔法】：把标题硬拼回正文开头
-            # 这样检索时，LLM 看到的第一句话就是 "**SOURCE: ...**"
-            doc.page_content = f"**SOURCE: [{source_tag}]**\n\n{doc.page_content}"
+        provider_name = relative_path.split(os.sep)[0]
 
-        # 步骤 3: 再次切分 (处理超长段落，但因为 chunk_size=2000，大部分不会被切碎)
-        final_splits = text_splitter.split_documents(md_docs)
-        all_processed_docs.extend(final_splits)
+        print(f"\n--- 正在处理保险商: {provider_name} (当前路径: {root}) ---")
+        
+        for filename in files:
+            if not filename.endswith(".md"):
+                continue
+                
+            file_path = os.path.join(root, filename)
+            print(f"  正在處理文件: {filename}...")
+            
+            # 读取文件
+            with open(file_path, 'r', encoding='utf-8') as f:
+                text = f.read()
+
+            # --- 特殊處理 A: 價格表/對比表 (不切分) ---
+            if "plans_pricing" in filename:
+                from langchain_core.documents import Document
+                doc = Document(
+                    page_content=text,
+                    metadata={
+                        "source": filename,
+                        "provider": provider_name,
+                        "language": "zh" if "_zh" in filename else "en",
+                        "type": "Pricing Table"
+                    }
+                )
+                all_processed_docs.append(doc)
+                continue
+
+            # --- 常規處理 B: 保單條款 (切分) ---
+            
+            # 步骤 1: 按 Header 切分
+            md_docs = markdown_splitter.split_text(text)
+            
+            # 步骤 2: 注入 Metadata 标签
+            for doc in md_docs:
+                doc.metadata["language"] = "zh" if "_zh" in filename else "en"
+                doc.metadata["source"] = filename
+                doc.metadata["provider"] = provider_name
+                
+            # 步骤 3: 再次切分
+            final_splits = text_splitter.split_documents(md_docs)
+            all_processed_docs.extend(final_splits)
 
     return all_processed_docs
 
 # ================= 主执行逻辑 =================
 
 if __name__ == "__main__":
-    # 1. 清理旧数据库 (可选，防止重复)
-    if os.path.exists(DB_PATH):
-        import shutil
-        shutil.rmtree(DB_PATH)
-        print("已清理旧向量库...")
+    # 1. 初始化向量库 (不清理舊數據)
+    print(f"正在初始化/加载向量库: {DB_PATH}")
+    
+    # Initialize Chroma first if it doesn't exist
+    vectorstore = Chroma(
+        persist_directory=DB_PATH,
+        embedding_function=EMBEDDING_MODEL
+    )
 
-    # 2. 加载与处理
+    # 2. 加载与处理新文档
     docs = load_and_process_documents(DATA_PATH)
-    print(f"共生成 {len(docs)} 个切片。")
+    print(f"共生成 {len(docs)} 個切片。")
 
     if not docs:
         print("No documents found. Exiting.")
         exit(0)
 
-    # 3. 向量化入库
-    print("正在生成向量并入库 (使用 BAAI/bge-m3)...")
-    vectorstore = Chroma.from_documents(
-        documents=docs,
-        embedding=EMBEDDING_MODEL,
-        persist_directory=DB_PATH
-    )
+    # 3. 向量化入庫 (使用穩定 ID 實現 upsert)
+    print("正在生成向量並更新向量庫 (使用穩定 ID 以防止重複)...")
     
-    print("✅ 入库完成！请运行 main.py 进行测试。")
+    # Generate stable IDs based on filename and content/index to allow upserting
+    import hashlib
+    def generate_id(doc, index):
+        # ID is a hash of (provider + filename + chunk index)
+        identifier = f"{doc.metadata.get('provider')}_{doc.metadata.get('source')}_{index}"
+        return hashlib.md_path(identifier.encode()).hexdigest() if hasattr(hashlib, 'md_path') else hashlib.md5(identifier.encode()).hexdigest()
+
+    ids = [generate_id(doc, i) for i, doc in enumerate(docs)]
+    
+    # add_documents will add or update if IDs are provided
+    vectorstore.add_documents(documents=docs, ids=ids)
+    
+    print("✅ 數據更新完成！(已實現 Upsert)")
