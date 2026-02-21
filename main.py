@@ -10,6 +10,15 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 import logging
 import re
+from typing import Optional
+
+# --- Provider Display Names ---
+PROVIDER_DISPLAY_NAMES = {
+    "bluecross": "Blue Cross 藍十字",
+    "one_degree": "OneDegree",
+    "prudential": "Prudential 保誠",
+    "bolttech": "Bolttech",
+}
 
 def clean_deepseek_output(raw_text):
     # Log raw output for debugging
@@ -38,6 +47,31 @@ app = FastAPI(title="Petwell Insurance RAG API")
 @app.get("/")
 async def root():
     return {"message": "Petwell Pet Insurance RAG API is running. use /ask to query."}
+
+# --- GET /providers ---
+@app.get("/providers")
+async def list_providers():
+    """Return list of available insurance providers from ChromaDB."""
+    if not vectorstore:
+        raise HTTPException(status_code=503, detail="RAG system not initialized")
+    try:
+        results = vectorstore.get(include=[])
+        # Get distinct providers from metadata
+        all_meta = vectorstore.get(include=["metadatas"])
+        providers_set = set()
+        for m in all_meta["metadatas"]:
+            p = m.get("provider")
+            if p:
+                providers_set.add(p)
+        
+        provider_list = [
+            {"id": pid, "name": PROVIDER_DISPLAY_NAMES.get(pid, pid)}
+            for pid in sorted(providers_set)
+        ]
+        return {"providers": provider_list}
+    except Exception as e:
+        logger.error(f"Error listing providers: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # --- Global Components ---
 embeddings = None
@@ -81,17 +115,23 @@ async def startup_event():
     
     template =''' 
         ### Role
-        You are the "Petwell AI Specialist," a professional expert on the Hong Kong pet insurance market. You provide answers based on retrieved policy documents from different providers (e.g., Blue Cross, OneDegree).
+        You are the "Petwell AI Specialist," a professional expert on the Hong Kong pet insurance market. You provide answers based on retrieved policy documents from different providers (e.g., Blue Cross, OneDegree, Prudential).
+
+        ### Provider Context
+        The user is currently viewing: {active_provider_name}
+        - If a specific provider is active (not "All Providers"), focus your answer on that provider's policy.
+        - If "All Providers" is active and the question is provider-specific but no provider is mentioned, note which providers you have information for and suggest the user select one.
+        - If the question is general, compare across all available providers in the context.
 
         ### INTERNAL LOGIC (Mental Sandbox - DO NOT OUTPUT)
-        1. **Identify Provider**: Which company is the user asking about? If unspecified, check all available context.
-        2. **Eligibility Check**: Verify pet age (e.g., 6 months to 8 years for Blue Cross) and breed (check for excluded breeds like Pit Bulls).
-        3. **Wait Times & Limits**: Apply provider-specific timelines (e.g., 90-day cancer wait for Blue Cross) and HK$ benefit limits.
+        1. **Identify Provider**: Which company is the user asking about? Use the active provider context above.
+        2. **Eligibility Check**: Verify pet age and breed against the active provider's rules.
+        3. **Wait Times & Limits**: Apply provider-specific timelines and HK$ benefit limits.
         4. **Conflict Resolution**: If policies differ, clearly state the terms for each provider separately.
 
         ### OUTPUT RULES
         - **No Thinking Process**: Do NOT output "Internal Logic," "Thinking," or "Sandbox." Start the response immediately.
-        - **Language**: Match the user's language (Traditional Chinese or English).
+        - **Language**: You MUST respond in the SAME language the user used in their question. If the user writes in English, you MUST reply entirely in English. If the user writes in Traditional Chinese, reply in Traditional Chinese. NEVER switch languages. The language of the source documents does NOT matter — always match the user's language.
         - **Formatting**: Use **Bold Text** for all dollar amounts (e.g., **HK$1,000**) and timeframes (e.g., **30 days**).
         - **Structure**:
             1. **Direct Answer**: A clear "Yes/No" or summary.
@@ -99,7 +139,10 @@ async def startup_event():
             3. **Comparison (If relevant)**: Briefly note if another provider has a different rule.
             4. **Next Step**: One actionable suggestion.
 
-        ### Context
+        ### Conversation History (for context only — do NOT reference or mention this section in your response)
+        {chat_history}
+
+        ### Retrieved Policy Documents
         {context}
 
         ### User Question
@@ -113,16 +156,24 @@ async def startup_event():
     logger.info("RAG Chain initialized (components loaded).")
 
 # --- API Models ---
+class ChatTurn(BaseModel):
+    role: str       # "user" or "assistant"
+    content: str
+
 class QueryRequest(BaseModel):
     query: str
-    provider: str = None  # Optional provider filter
+    provider: Optional[str] = None        # Explicit provider filter (from backend)
+    session_id: Optional[str] = None      # Session ID (passed through from backend)
+    chat_history: Optional[list[ChatTurn]] = None  # Last N conversation turns
 
 class QueryResponse(BaseModel):
     answer: str
     sources: list[str]
+    active_provider: Optional[str] = None   # Which provider was used for filtering
+    session_id: Optional[str] = None        # Echo back for frontend tracking
 
 def format_docs(docs):
-    # Goal: '--- SOURCE: [provider] ([filename]) ---'
+    """Format retrieved documents with source headers."""
     formatted_chunks = []
     for d in docs:
         provider = d.metadata.get('provider', 'Unknown')
@@ -131,23 +182,43 @@ def format_docs(docs):
         formatted_chunks.append(f"{header}\n{d.page_content}")
     return "\n\n".join(formatted_chunks)
 
+def format_chat_history(chat_history: list[ChatTurn], max_turns: int = 5) -> str:
+    """Format the last N conversation turns for prompt injection.
+    Truncates assistant answers to 300 chars to save context window."""
+    if not chat_history:
+        return "None"
+    
+    # Take only the last max_turns pairs
+    recent = chat_history[-(max_turns * 2):]
+    
+    lines = []
+    for turn in recent:
+        content = turn.content
+        if turn.role == "assistant" and len(content) > 300:
+            content = content[:300] + "..."
+        prefix = "User" if turn.role == "user" else "Assistant"
+        lines.append(f"{prefix}: {content}")
+    
+    return "\n".join(lines)
+
 @app.post("/ask", response_model=QueryResponse)
 async def ask_insurance_policy(request: QueryRequest):
     if not vectorstore:
         raise HTTPException(status_code=503, detail="RAG system not initialized")
         
     try:
-        logger.info(f"Received query: {request.query} (Filter: {request.provider})")
+        logger.info(f"Received query: {request.query} (Filter: {request.provider}, Session: {request.session_id})")
         
         # 1. Prepare retriever with optional filter
         search_kwargs = {"k": 6}
         
-        # Detect provider in query if not explicitly provided
+        # Resolve effective provider from request
         effective_provider = request.provider
         # Ignore default "string" value or empty values
         if effective_provider in [None, "", "string"]:
             effective_provider = None
             
+        # Fallback: detect provider from query keywords
         if not effective_provider:
             query_lower = request.query.lower()
             if "blue cross" in query_lower or "bluecross" in query_lower or "藍十字" in query_lower:
@@ -172,20 +243,35 @@ async def ask_insurance_policy(request: QueryRequest):
         docs = await retriever.ainvoke(request.query)
         sources = list(set([f"{d.metadata.get('provider', 'Unknown')} ({d.metadata.get('source', 'Unknown')})" for d in docs]))
         
-        # 3. Build and run chain manually to handle dynamic context
+        # 3. Build prompt inputs
         context_str = format_docs(docs)
+        chat_history_str = format_chat_history(request.chat_history) if request.chat_history else "None"
+        active_provider_name = PROVIDER_DISPLAY_NAMES.get(effective_provider, "All Providers") if effective_provider else "All Providers"
         
+        logger.info(f"Provider: {effective_provider} ({active_provider_name}), History turns: {len(request.chat_history) if request.chat_history else 0}")
+        
+        # 4. Build and run chain
         chain = (
             prompt
             | llm
             | StrOutputParser()
         )
         
-        raw_answer = await chain.ainvoke({"context": context_str, "question": request.query})
+        raw_answer = await chain.ainvoke({
+            "context": context_str,
+            "question": request.query,
+            "chat_history": chat_history_str,
+            "active_provider_name": active_provider_name,
+        })
         logger.info(f"Raw LLM Response Body: {repr(raw_answer)}")
         answer = clean_deepseek_output(raw_answer)
         
-        return QueryResponse(answer=answer, sources=sources)
+        return QueryResponse(
+            answer=answer,
+            sources=sources,
+            active_provider=effective_provider,
+            session_id=request.session_id,
+        )
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
