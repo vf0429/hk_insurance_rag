@@ -859,25 +859,81 @@ Your dog or cat with proof of identity specified in the Policy Schedule.
 
 
 
-
-
-
-
-# Product Plan Comparison & Pricing Schedule (Full)
+# Product Plan Comparison
 
 ## 1. Core Medical Coverage Details
-| Benefit Item                  | Essential                                                    | Plus                                                         | Ultra                                                        | Prestige                                                     |
-| :---------------------------- | :----------------------------------------------------------- | :----------------------------------------------------------- | :----------------------------------------------------------- | :----------------------------------------------------------- |
-| **Reimbursement Rate**        | **Age 1+**: 90% (Network) / 70% (Non-Network)<br>**13wks-11mths**: 50% (All Vets) | **Age 1+**: 90% (Network) / 70% (Non-Network)<br>**13wks-11mths**: 50% (All Vets) | **Age 1+**: 90% (Network) / 70% (Non-Network)<br>**13wks-11mths**: 50% (All Vets) | **Age 1+**: 90% (Network) / 70% (Non-Network)<br>**13wks-11mths**: 50% (All Vets) |
-| **Surgery**                   | ✅ Covered                                                    | ✅ Covered                                                    | ✅ Covered                                                    | ✅ Covered                                                    |
-| **Overnight Hospitalization** | ✅ Covered                                                    | ✅ Covered                                                    | ✅ Covered                                                    | ✅ Covered                                                    |
-| **X-Ray & Ultrasound**        | ✅ Covered                                                    | ✅ Covered                                                    | ✅ Covered                                                    | ✅ Covered                                                    |
-| **Lab Test**                  | ✅ Covered                                                    | ✅ Covered                                                    | ✅ Covered                                                    | ✅ Covered                                                    |
-| **Medication**                | ✅ Covered                                                    | ✅ Covered                                                    | ✅ Covered                                                    | ✅ Covered                                                    |
-| **General Consultation**      | ❌ Not Covered                                                | ✅ Covered                                                    | ✅ Covered                                                    | ✅ Covered                                                    |
-| **Specialist Consultation**   | ❌ Not Covered                                                | ✅ Covered                                                    | ✅ Covered                                                    | ✅ Covered                                                    |
-| **MRI & CT Scans**            | ❌ Not Covered                                                | ❌ Not Covered                                                | ❌ Not Covered                                                | ✅ **Covered** (Exclusive)                                    |
-| **Cancer Cash Benefit**       | **HKD 10,000**                                               | **HKD 10,000**                                               | **HKD 10,000**                                               | **HKD 10,000**                                               |
+
+### **Reimbursement Rate**
+
+- **Essential**: Age 1+: 90% (Network) / 70% (Non-Network); 13wks-11mths: 50% (All Vets)
+- **Plus**: Age 1+: 90% (Network) / 70% (Non-Network); 13wks-11mths: 50% (All Vets)
+- **Ultra**: Age 1+: 90% (Network) / 70% (Non-Network); 13wks-11mths: 50% (All Vets)
+- **Prestige**: Age 1+: 90% (Network) / 70% (Non-Network); 13wks-11mths: 50% (All Vets)
+
+### **Surgery**
+
+- **Essential**: Covered
+- **Plus**: Covered
+- **Ultra**: Covered
+- **Prestige**: Covered
+
+### **Overnight Hospitalization**
+
+- **Essential**: Covered
+- **Plus**: Covered
+- **Ultra**: Covered
+- **Prestige**: Covered
+
+### **X-Ray & Ultrasound**
+
+- **Essential**: Covered
+- **Plus**: Covered
+- **Ultra**: Covered
+- **Prestige**: Covered
+
+### **Lab Test**
+
+- **Essential**: Covered
+- **Plus**: Covered
+- **Ultra**: Covered
+- **Prestige**: Covered
+
+### **Medication**
+
+- **Essential**: Covered
+- **Plus**: Covered
+- **Ultra**: Covered
+- **Prestige**: Covered
+
+### **General Consultation**
+
+- **Essential**: Not Covered
+- **Plus**: Covered
+- **Ultra**: Covered
+- **Prestige**: Covered
+
+### **Specialist Consultation**
+
+- **Essential**: Not Covered
+- **Plus**: Covered
+- **Ultra**: Covered
+- **Prestige**: Covered
+
+### **MRI & CT Scans**
+
+- **Essential**: Not Covered
+- **Plus**: Not Covered
+- **Ultra**: Not Covered
+- **Prestige**: Covered (Exclusive)
+
+### **Cancer Cash Benefit**
+
+- **Essential**: HKD 10,000
+- **Plus**: HKD 10,000
+- **Ultra**: HKD 10,000
+- **Prestige**: HKD 10,000
+
+
 
 ## 2. Optional Add-on Coverages (Extra Cost)
 

@@ -154,6 +154,10 @@ async def ask_insurance_policy(request: QueryRequest):
                 effective_provider = "bluecross"
             elif "one degree" in query_lower or "onedegree" in query_lower:
                 effective_provider = "one_degree"
+            elif "prudential" in query_lower or "pruchoice" in query_lower or "保誠" in query_lower:
+                effective_provider = "prudential"
+            elif "bolttech" in query_lower:
+                effective_provider = "bolttech"
 
         if effective_provider and effective_provider != "string":
             logger.info(f"Active filter: {effective_provider}")

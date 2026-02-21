@@ -796,4 +796,3 @@ Upon renewal, there will be a No Claim Discount on the premium if no claim has b
 - **Affiliation:** Blue Cross (Asia-Pacific) Insurance Limited is a subsidiary of AIA Group Limited. It is not affiliated with Blue Cross and Blue Shield Association.
 
 ------
-
